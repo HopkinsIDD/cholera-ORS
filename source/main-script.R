@@ -1,6 +1,9 @@
-#########################
-## Plots for ORS Paper ##
-#########################
+## Main Analyses and Plots for Tracking Cholera/Diarrhea
+## with ORS sales manuscript
+## contact azman@jhu.edu wtih any questions or problems
+
+
+## packages needed
 library(fields) # for some image.plot stuff
 library(MASS) # for neg. binom model (but not using at the moment)
 library(TTR) # for time series smoothing
@@ -8,8 +11,13 @@ library(magrittr)
 library(dplyr)
 library(irr)
 library(lme4)
+library(mgcv) ## for negative binoms
+
+## load some core functions (plus some old functions not actually used here)
 source("Code/R/bangpharma-functions.R")
 
+## flag for remaking pdf figures
+## never made this fuly functional
 remake_pdfs <- FALSE
 
 ## ----------------- ##
@@ -19,23 +27,28 @@ remake_pdfs <- FALSE
 ## dates
 date.seq <- seq.Date(as.Date("2013-04-17"),as.Date("2013-10-30"),by=1)
 
-## cholera
+## cholera data
 trimmed.cholera.daily <- readRDS("Generated_Data/trimmed_cholera_daily.rds")
 trimmed.cholera.weekly<-readRDS("Generated_Data/trimmed_cholera_weekly.rds")
-## diarrhea
+
+## diarrhea data
 trimmed.all.diarrhea.daily <- readRDS("Generated_Data/trimmed_all_diarrhea_daily.rds")
 trimmed.nonc.diarrhea.daily <- readRDS("Generated_Data/trimmed_nonc_diarrhea_daily.rds")
 trimmed.all.diarrhea.weekly <- readRDS("Generated_Data/trimmed_all_diarrhea_weekly.rds")
 trimmed.diarrhea.weekly <- readRDS("Generated_Data/trimmed_nonc_diarrhea_weekly.rds")
 
-## ors
+## ors data
+
+## number of packets sold
 packets.indmat.daily <- readRDS("Generated_Data/packets_indmat_daily.rds")
 packets.daily <- readRDS("Generated_Data/packets_daily.rds")
+packets.indmat.weekly<-readRDS("Generated_Data/packets_indmat_weekly.rds")
+packets.weekly<-readRDS("Generated_Data/packets_weekly.rds")
+
+## number of customers 
 cust.daily <- readRDS("Generated_Data/cust_daily.rds")
 cust.indmat.daily<-readRDS("Generated_Data/cust_indmat_daily.rds")
 cust.indmat.weekly<-readRDS("Generated_Data/cust_indmat_weekly.rds")
-packets.indmat.weekly<-readRDS("Generated_Data/packets_indmat_weekly.rds")
-packets.weekly<-readRDS("Generated_Data/packets_weekly.rds")
 cust.weekly<-readRDS("Generated_Data/cust_weekly.rds")
 cust.weekly[is.nan(cust.weekly)] <- NA # NaN's are a result of Missing data
 
@@ -60,7 +73,6 @@ quantile(cust.daily,na.rm=T)
 ## per pharmacy mean
 plot(ecdf(apply(packets.daily,1,function(x) mean(x,na.rm=T))))
 plot(ecdf(apply(cust.daily,1,function(x) mean(x,na.rm=T))))
-#hist()
 range(apply(cust.daily,1,function(x) sum(x==0,na.rm=T)/sum(!is.na(x))))
 
 ## missing data days
@@ -77,11 +89,12 @@ missing.pharm.days <- sapply(1:nrow(cust.daily),function(x) sum(is.na(cust.daily
 quantile(missing.pharm.days)
 mean(missing.pharm.days)
 
-##########################
-## load bangpharma data ##
-##########################
+################################
+## load bangpharma sales data ##
+################################
 
 bp.raw <- read.csv("Data/bangpharmaData/bangpharma_sales_2014-04-30.csv")
+
 ## do a little pre-processing of the data
 bp <- clean.new.data(bp.raw,TRUE)
 combined.ors <- ddply(bp,.(sale.created_at),function(x) sum(x$sale.ors))
@@ -95,7 +108,6 @@ out <- dcast(out,sale.created_at~sale.pharmacy_id,fun.aggregate = sum)
 rownames(out) <- out[,1]
 out <- out[,-1]
 
-
 ## let's look by week
 wn <- week(as.Date(rownames(out),format="%Y-%m-%d"))
 out <- data.frame(out)
@@ -105,10 +117,8 @@ out.by.week <- ddply(out,'week',function(x){
     rc <- colSums(tmp,na.rm=T)
 })
 
-
 ## first let's check out reporting volume by pharmacy overtime
 ## by week
-
 pp <- bp %>% group_by(sale.pharmacy_id,week) %>% summarise(reports=n()) %>%
   ggplot() + geom_point(aes(x=week,y=reports,group=1)) +
   geom_smooth(aes(x=week,y=reports,group=1),method=lm) +
@@ -401,25 +411,6 @@ all.pharms$sid <- as.numeric(gsub("AP","",all.pharms[,1]))
 pharm.locs <- data.frame(pharm.locs[,-ncol(pharm.locs)][,c(1,3,4)])
 colnames(pharm.locs) <- c("id","lat","lon")
 
-warning("merge here is messed up, not sure what happened but need to get this
-working again or delete")
-new.locs.df <- merge(pharm.locs,all.pharms,by="sid")
-new.locs.df$mds <- mds
-rbPal <- colorRampPalette(c('red','blue'))
-new.locs.df$col <- rbPal(100)[as.numeric(cut(mds,breaks = 100))]
-
-library(ggmap)
-mymap = get_map(location = c(lon = 90.407, lat = 23.887),
-    zoom = 15, maptype = 'satellite',color="bw")
-pharmmap = ggmap(mymap,legend="topleft") +
-geom_point(data=new.locs.df, aes(x=Longitude, y=Latitude,col=mds)) +
-labs(title = "Spatial Specficity")+ scale_colour_gradient2(low="red", high="blue",midpoint=0)
-pdf("Figures/spatialspec.pdf")
-print(pharmmap)
-dev.off()
-#ggplot_build(pharmmap)
-
-
 #####################
 ## Cholera and ORS ##
 #####################
@@ -498,47 +489,6 @@ lag = 7
 smoothcases=c(rep(NA,lag),smooth.spline((lag.and.pad(trimmed.all.diarrhea.daily,lag))[-c(1:lag)])$y)
 glm(lag.and.pad(trimmed.all.diarrhea.daily,best.lags[2])~pred ,family="quasipoisson")
 
-## ## let's try a little cross-validation
-
-
-## xy <- data.frame(cases=lag.and.pad(trimmed.all.diarrhea.daily,best.lags[2]),ors=pred)
-## xy <- xy[-which(is.na(rowSums(xy))),]
-
-## fit.all <- glm(cases ~ ors,family="quasipoisson",data=xy)
-
-## boot_me <- function(preddata,fit,data){
-##     tmp_dat <- data[sample(nrow(data),size=nrow(data),replace=T),]
-##     tmp_fit <- update(fit.all,data=tmp_dat)
-##     tmp_pred <- predict(tmp_fit,type='response',newdata=preddata)
-##     rpois(length(tmp_pred),lambda=tmp_pred)
-## }
-
-## simvals <- raply(500,boot_me(preddata=data.frame(ors=xy[,2]),fit=fit.all,data=xy))
-## w = apply(simvals,2,function(x) quantile(x,c(.025,.975)))
-## plot(xy[,1],ylim=c(0,10))
-## polygon(x=c(1:190,190:1),y=c(w[1,],rev(w[2,])),col=AddAlpha('grey',.1),border="white",bty="n")
-
-## choose a random month period
-
-## months <- month(date.seq) %>% as.numeric
-## unique.months <- unique(months)
-
-## pred.list <- list()
-## for (i in seq_along(unique.months)){
-##     ## create temp dataset
-##     rem.inds <- which(months==unique.months[i])
-##     y.chol <- lag.and.pad(trimmed.cholera.daily[-rem.inds],best.lags[1])
-##     x.sales <- pred[-rem.inds]
-##     fit.tmp <- glm(y.chol~x.sales,family="quasipoisson")
-##     pred.list[[i]] <-
-##         cbind(pred=
-##                 predict(fit.tmp,data.frame(x.sales=pred[rem.inds]),interval="prediction",type="response",se.fit=TRUE)
-##              ,
-##                             truth=lag.and.pad(trimmed.cholera.daily[rem.inds],best.lags[1]))
-## }
-
-
-#plot(date.seq,rowSums(cust.daily.norm,na.rm=T),type="h",col=ifelse(rowSums(cust.daily.norm,na.rm=T)>0,1,3))
 pdf("Figures/meancommunitywideors.pdf",width=6,height=3)
 palette(brewer.pal(4,"RdBu"))
 par(mfrow=c(1,1),mar=c(.5,1,.5,0),oma=c(2,2,1,1),mgp=c(2,.2,0),tck=-.01)
@@ -561,23 +511,6 @@ mtext("Community-Wide ORS Sales",side=2,outer=2,cex=.95,line=.2)
 ## mtext("Medically Attended Cases",side=2,outer=2,at = .25,cex=.95,line=.2)
 dev.off()
 
-
-n <- 10000
-b0 <- .1
-b1 <- .3
-x <- runif(n,-1,1)
-mu <- exp(b0+b1*x)
-y <- rpois(n,mu)
-predict(
-    fit =  glm(y~x,family="poisson")
-    range(y)
-    range(predict(fit,type="response"))
-   plot( predict(fit,data.frame(x=seq(-1,1,length=100)),type="response"))
-
-   ,type='response')
-
-
-
 #########################
 ## Temperature and ORS ##
 #########################
@@ -597,7 +530,6 @@ lm(pred ~ Mean_TemperatureC,data=wdat) %>% confint
 
 
 ggplot(wdat) + geom_smooth(aes(x=Max_TemperatureC,y=pred),method='glm') +
-#  geom_smooth(aes(x=Max_TemperatureC,y=pred),col=2,se = FALSE) +
   geom_point(aes(x=Max_TemperatureC,y=pred)) -> gg
 to.pdf(print(gg),filename="Figures/max_temp_ors.pdf")
 
@@ -617,12 +549,6 @@ fit.nonc <-  glm(trimmed.nonc.diarrhea.daily~lag.and.pad(meantemp_cent,best.lags
 fit.cholera <- lm(trimmed.cholera.daily~meantemp_cent)
 fit.all <- glm(lag.and.pad(trimmed.all.diarrhea.daily,best.lags[2])~pred + meantemp_cent,family="quasipoisson")
 fit.nonc <- glm(lag.and.pad(trimmed.nonc.diarrhea.daily,best.lags[3])~pred + meantemp_cent,family="quasipoisson")
-
-## ggplot(wdat) + geom_smooth(aes(x=Min_TemperatureC,y=pred),method='glm') +
-##   geom_smooth(aes(x=Min_TemperatureC,y=pred),col=2,se = FALSE) +
-##   geom_point(aes(x=Min_TemperatureC,y=pred))
-
-
 
 ###########################################
 ## Revised Temperature Adjusted Analyses ##
@@ -655,11 +581,9 @@ for (i in 0:10){
 }
 
 (best.lags_temp <- c(0:10)[apply(aics,2,which.min)])
-
 round(apply(aics,2,function(x) x - min(x)),1)
 
 ## new estimates
-library(mgcv)
 fit.cholera <- glm(lag.and.pad(trimmed.cholera.daily,best.lags_temp[1])~pred + meantemp_cent,family="quasipoisson")
 summary(fit.cholera)
 exp(coef(fit.cholera))
@@ -691,88 +615,3 @@ if(remake_pdfs){
 to.pdf(print(gg),filename = "Figures/age_by_week_ors.pdf",width=7,height=4)
 }
 mean(dig_ors_dat$yr15le == 1,na.rm=T)
-
-load("Generated_Data/q2cln.Rda") #q2c1n object has
-q2cln[which(q2cln[,2] == "0001003"),"indcc"] <- 0 # correction
-index.ids <- q2cln[q2cln[,"indcc"] == 1,'datamemberid']
-quantile(q2cln[which(q2cln[,'datamemberid'] %in% index.ids),]$q1_years)
-
-
-
-##########################################
-## Plotting Pharmacy Locations with OSM ##
-##########################################
-library(sp)
-library(maptools)
-library(ggmap)
-
-## bring in pharmacy locations
-pharm.locs.lookup <- read.csv("Data/PharmacyRecruitement/Pharmacy_Registration_Data.csv",as.is=T) #actual ones enrolled but the GPS on these doesn't seem correct
-pharm.locs <- read.csv("Data/All_Coordinate_of_Pharmacies.csv")
-pharm.locs$GPS.AP.ID <- as.numeric(sapply(as.character(pharm.locs[,1]),function(x) strsplit(x,split="AP")[[1]][2]))
-pharm.locs <- join(pharm.locs.lookup[,c("Pharmacy.ID","GPS.AP.ID")],pharm.locs)
-colnames(pharm.locs)[4:5] <- c("latitude","longitude")
-
-## bring in Arichpur border
-arichpur_border <- read.csv("Data/Boundary_of_Arichpur.csv")[,1:3]
-ch <- chull(arichpur_border[,2:3])
-coords <- arichpur_border[c(ch, ch[1]), ]  # closed polygon
-plot(arichpur_border[,2:3])
-lines(coords[,2:3],col="red")
-
-## bring in case locations
-dat=read.csv("Generated_Data/clinic_spatial_mlva_wide.csv")
-dat = subset(dat, Sample.Loc!="pharm")
-glimpse(dat)
-dat[which(is.na(dat$longitude)),] %>% length
-dat$Household.ID[which(duplicated(dat$Household.ID))] <- 9999
-
-get_map(location = c(lat = 23.888, lon = 90.406), zoom = 16,
-scale = "auto", maptype = "roadmap", source = "osm",
-messaging = FALSE, urlonly = FALSE, filename = "ggmapTemp",
-crop = TRUE, color = "bw", language = "en-EN") -> my_map
-                                        #fortify(vac_areas) -> vac_areas_f
-cols <- brewer.pal(3,"Dark2")
-
-## now a little magic to make a scale bar
-bb <- attr(my_map,"bb")
-
-sbar <- data.frame(lon.start = c(bb$ll.lon + 0.1*(bb$ur.lon - bb$ll.lon)),
-                   lon.end = c(bb$ll.lon + 0.25*(bb$ur.lon - bb$ll.lon)),
-                   lat.start = c(bb$ll.lat + 0.1*(bb$ur.lat - bb$ll.lat)),
-                   lat.end = c(bb$ll.lat + 0.1*(bb$ur.lat - bb$ll.lat)))
-
-
-sbar$distance = distHaversine(long = c(sbar$lon.start,sbar$lon.end),
-                              lat = c(sbar$lat.start,sbar$lat.end))
-
-ptspermm <- 2.83464567  # need this because geom_text uses mm, and themes use pts. Urgh.
-
-ggmap(my_map, extent = "normal",maprange = FALSE) +
-  geom_point(data=pharm.locs,aes(x=longitude,y=latitude),alpha=.95,pch=17,col=cols[1]) +
-  geom_point(data=dat,aes(x=longitude,y=latitude),col=cols[2]) +
-  geom_segment(data = sbar,
-               aes(x = lon.start,
-                   xend = lon.end,
-                   y = lat.start,
-                   yend = lat.end)) +
-                     geom_text(data = sbar,
-            aes(x = (lon.start + lon.end)/2,
-                y = lat.start + 0.025*(bb$ur.lat - bb$ll.lat),
-                label = paste(format(distance,
-                    digits = 3,
-                    nsmall = 0),
-                    'meters')),
-            hjust = 0.5,
-            vjust = 0,
-            size = 8/ptspermm)  +
-             coord_map(projection="mercator",
-                       xlim=c(bb$ll.lon, bb$ur.lon),
-                       ylim=c(bb$ll.lat, bb$ur.lat)) +
-                         xlab('longitude') + ylab('latitude') -> gg
-to.pdf(print(gg),filename = "Figures/pharmacies_and_cases_osm.pdf")
-png(file="Figures/pharmacies_and_cases_osm.png",width=4000,height=3500,res=500)
-print(gg)
-dev.off()
-bitmap("pharmacies_and_cases_osm.tiff", height = 4, width = 4, units = 'in', type="tifflzw", res=300)
-print(gg)
